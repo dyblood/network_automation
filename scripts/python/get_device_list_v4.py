@@ -2,7 +2,9 @@ import requests
 import os
 from requests.auth import HTTPBasicAuth
 import pandas as pd
-from env_DNAC import *
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Disable SSL warning
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
@@ -14,7 +16,7 @@ YELLOW = '\033[93m'
 RESET = '\033[0m'
 
 
-def get_auth_token():
+def get_auth_token(DNAC_BURL = os.getenv('DNAC_BURL'), DNAC_USER = os.getenv('DNAC_USER'), DNAC_PASS = os.getenv('DNAC_PASS')):
     """Get authentication token from Cisco DNA Center."""
     url = f"{DNAC_BURL}/dna/system/api/v1/auth/token"
     response = requests.post(url, auth=HTTPBasicAuth(DNAC_USER, DNAC_PASS), verify=False)
@@ -22,7 +24,7 @@ def get_auth_token():
     return response.json()['Token']
 
 
-def get_api_response(endpoint):
+def get_api_response(endpoint, DNAC_BURL = os.getenv('DNAC_BURL')):
     """General function to make GET requests to DNAC APIs."""
     token = get_auth_token()
     url = f"{DNAC_BURL}{endpoint}"
@@ -89,8 +91,7 @@ def save_devices_to_excel(device_json, filename):
 
 
 def main():
-    # filename = "C:\\Users\\devon.d.youngblood\\OneDrive - US Army\\Desktop\\youngblood_netops\\get_device_list\\get_device_list.xlsx"
-    filename = "/mnt/c/Users/devon.d.youngblood/OneDrive - US Army/Desktop/youngblood_netops/get_device_list/get_device_list.xlsx"
+    filename = f"{os.getenv('WIN_DESK_PATH')}youngblood_netops/get_device_list/get_device_list.xlsx"
 
     os.makedirs(os.path.dirname(filename), exist_ok=True)
 
