@@ -245,7 +245,7 @@ def main():
     create_csv_tracker(device_list, TRACKER_CSV)
     unconfigured = get_not_configured_devices(TRACKER_CSV)
     patterns = [
-        # {"parent": "^ip access-list", "child": "160.136.16.63"},
+        # {"parent": "^ip access-list", "child": "<thing to search>"},
         # {"parent": "^interface", "child": "NETFLOW"},
         {"exact": "VPN-NEXT-HOP-"},
         {"exact": "interface Tunnel"},
