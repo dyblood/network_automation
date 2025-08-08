@@ -8,6 +8,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+DNAC_BURL = os.getenv('DNAC_BURL')
+DNAC_USER = os.getenv('DNAC_USER')
+DNAC_PASS = os.getenv('DNAC_PASS')
+WIN_DESK_PATH = os.getenv('WIN_DESK_PATH')
 
 def get_auth_token():
     """
@@ -96,31 +100,6 @@ def cvs_to_dict():
             }
             dev_list.append(dev_dict)  
     return dev_list
-
-# def cvs_to_dict():
-#     dev_list = []
-#     software_type_map = {
-#         'IOS-XE': 'device_xe',
-#         'IOS': 'device_ios'
-#     }
-    
-#     with open('get_device_list_cvs.csv', mode='r') as csvfile:
-#         reader = csv.DictReader(csvfile)
-#         dev_list_dict = [row for row in reader]
-    
-#     for i in dev_list_dict:
-#         if i['family'] not in ['Unified AP', 'Wireless Controller']:
-#             device_type = software_type_map.get(i['softwareType'], i['softwareType'])
-#             dev_dict = {
-#                 'hostname': i['hostname'],
-#                 'host': i['managementIpAddress'],
-#                 'device_type': device_type,
-#                 'family': i['family']
-#             }
-#             dev_list.append(dev_dict)  
-
-#     return dev_list
-
 
 
 def main():

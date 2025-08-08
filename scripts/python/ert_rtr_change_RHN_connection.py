@@ -6,17 +6,17 @@ from netmiko import ConnectHandler, NetmikoTimeoutException, NetmikoAuthenticati
 from ciscoconfparse import CiscoConfParse
 from env_DNAC import *
 from dotenv import load_dotenv
-
 load_dotenv()
+
 requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
-
-win_desk_path = os.getenv('WIN_DESK_PATH')
-CONFIG_DIR = f"{win_desk_path}youngblood_netops/ERT_router_changes"
-
-TRACKER_CSV = CONFIG_DIR + "/ert_rtr_change_tracker.csv"
-
-DEVICE_LIST_CSV = CONFIG_DIR + "/get_device_list.csv"
+DNAC_BURL = os.getenv('DNAC_BURL')
+DNAC_USER = os.getenv('DNAC_USER')
+DNAC_PASS = os.getenv('DNAC_PASS')
+WIN_DESK_PATH = os.getenv('WIN_DESK_PATH')
+CONFIG_DIR = f"{WIN_DESK_PATH}youngblood_netops/ERT_router_changes/"
+TRACKER_CSV = f"{CONFIG_DIR}ert_rtr_change_tracker.csv"
+DEVICE_LIST_CSV = f"{CONFIG_DIR}get_device_list.csv"
 
 def get_auth_token():
     url = f"{DNAC_BURL}/dna/system/api/v1/auth/token"
@@ -153,13 +153,6 @@ def find_and_remove_lines(connection, parse, parent=None, child=None, exact_line
     except Exception as e:
         print(f"[ERROR] Failed to remove lines: {e}")
 
-
-# def additional_commands(connection, commands):
-#     for cmd in commands:
-#         try:
-#             print(connection.send_config_set(f'{cmd}'))
-#         except Exception as e:
-#             print(f"[ERROR] Failed to run '{cmd}': {e}")
 
 def additional_commands(connection, commands):
     try:
