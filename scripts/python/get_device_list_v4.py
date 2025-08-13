@@ -1,78 +1,74 @@
-import requests
+"""Retrieve and display Catalyst Center device list with optional Excel export.
+
+This refactored version uses :mod:`na_utils.dnac` to query the
+Catalyst Center API rather than reimplementing token handling.  It
+prints a formatted table of devices and can optionally save the list
+to an Excel file.  Use command line arguments to control output.
+"""
+
+from __future__ import annotations
+
+import argparse
 import os
-from requests.auth import HTTPBasicAuth
+from pathlib import Path
+from typing import Dict, Any, List
+
 import pandas as pd
-from dotenv import load_dotenv
+import sys
+from colorama import init, Fore, Style
 
-load_dotenv()
+# Ensure project root on path for na_utils
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-# Disable SSL warning
-requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
-
-# ANSI color codes
-GREEN = '\033[92m'
-RED = '\033[91m'
-YELLOW = '\033[93m'
-RESET = '\033[0m'
+from na_utils.dnac import get_device_list
 
 
-def get_auth_token(DNAC_BURL = os.getenv('DNAC_BURL'), DNAC_USER = os.getenv('DNAC_USER'), DNAC_PASS = os.getenv('DNAC_PASS')):
-    """Get authentication token from Cisco DNA Center."""
-    url = f"{DNAC_BURL}/dna/system/api/v1/auth/token"
-    response = requests.post(url, auth=HTTPBasicAuth(DNAC_USER, DNAC_PASS), verify=False)
-    response.raise_for_status()
-    return response.json()['Token']
+def safe_format(value: Any, default: str = "N/A") -> str:
+    return str(value) if value is not None else default
 
 
-def get_api_response(endpoint, DNAC_BURL = os.getenv('DNAC_BURL')):
-    """General function to make GET requests to DNAC APIs."""
-    token = get_auth_token()
-    url = f"{DNAC_BURL}{endpoint}"
-    headers = {'x-auth-token': token, 'content-type': 'application/json'}
-    response = requests.get(url, headers=headers, verify=False)
-    response.raise_for_status()
-    return response.json()
+def print_device_list(device_json: Dict[str, Any]) -> None:
+    """Pretty print the device list with colour coded reachability."""
+    init(autoreset=True)
+    header = [
+        "HOSTNAME", "ROLE", "SERIAL", "PLATFORM ID", "VERSION",
+        "REACHABILITY", "MGMT IP", "MAC", "ID",
+    ]
+    col_widths = [50, 15, 12, 18, 12, 18, 18, 17, 35]
+    # Print header
+    row_fmt = "| " + " | ".join(f"{{:<{w}}}" for w in col_widths) + " |"
+    print(row_fmt.format(*header))
+    for device in device_json.get("response", []):
+        status = device.get("reachabilityStatus", "Unknown")
+        hostname = device.get("hostname")
+        if status.lower() == "reachable":
+            status_col = Fore.GREEN + status + Style.RESET_ALL
+            hostname_col = Fore.GREEN + hostname + Style.RESET_ALL
+        elif status.lower() == "unreachable":
+            status_col = Fore.RED + status + Style.RESET_ALL
+            hostname_col = Fore.RED + hostname + Style.RESET_ALL
+        else:
+            status_col = Fore.YELLOW + status + Style.RESET_ALL
+            hostname_col = Fore.YELLOW + hostname + Style.RESET_ALL
+        row = [
+            hostname_col,
+            safe_format(device.get("role")),
+            safe_format(device.get("serialNumber")),
+            safe_format(device.get("platformId")),
+            safe_format(device.get("softwareVersion")),
+            status_col,
+            safe_format(device.get("managementIpAddress")),
+            safe_format(device.get("macAddress")),
+            safe_format(device.get("id")),
+        ]
+        print(row_fmt.format(*row))
 
 
-def get_device_list():
-    """Fetch the list of network devices."""
-    return get_api_response("/api/v1/network-device")
-
-
-def safe_format(value, default='N/A'):
-    """Helper to safely format values."""
-    return value if value is not None else default
-
-
-def print_device_list(device_json):
-    """Print formatted list of devices with color-coded reachability."""
-    print("| {0:40} | {1:15} | {2:12} | {3:18} | {4:12} | {5:14} | {6:25} | {7:18} | {8:35} |"
-          .format("HOSTNAME", "MGMT IP", "SERIAL", "PLATFORM ID", "VERSION", "REACHABILITY", "ROLE", "MAC", "ID"))
-
-    for device in device_json.get('response', []):
-        status = device.get('reachabilityStatus', 'Unknown')
-        color = GREEN if status == 'Reachable' else RED if status == 'Unreachable' else YELLOW
-
-        try:
-            print("|{0:50} | {1:15} | {2:12} | {3:18} | {4:12} | {5:23} | {6:25} | {7:18} | {8:35} |"
-                  .format(f"{color}{safe_format(device.get('hostname'))}{RESET}",
-                          safe_format(device.get('role')),
-                          safe_format(device.get('serialNumber')),
-                          safe_format(device.get('platformId')),
-                          safe_format(device.get('softwareVersion')),
-                          f"{color}{status}{RESET}",
-                          safe_format(device.get('managementIpAddress')),
-                          safe_format(device.get('macAddress')),
-                          safe_format(device.get('id'))))
-        except Exception as e:
-            print(f"Error formatting device data: {e}")
-            print(device)
-
-
-def save_devices_to_excel(device_json, filename):
-    """Save device list to an Excel file."""
-    devices = []
-    for device in device_json.get('response', []):
+def save_devices_to_excel(device_json: Dict[str, Any], filename: str) -> None:
+    devices: List[Dict[str, Any]] = []
+    for device in device_json.get("response", []):
         devices.append({
             'Hostname': safe_format(device.get('hostname')),
             'Management IP': safe_format(device.get('managementIpAddress')),
@@ -82,23 +78,25 @@ def save_devices_to_excel(device_json, filename):
             'Reachability Status': safe_format(device.get('reachabilityStatus')),
             'Role': safe_format(device.get('role')),
             'MAC Address': safe_format(device.get('macAddress')),
-            'ID': safe_format(device.get('id'))
+            'ID': safe_format(device.get('id')),
         })
-
     df = pd.DataFrame(devices)
+    Path(filename).parent.mkdir(parents=True, exist_ok=True)
     df.to_excel(filename, index=False)
     print(f"Device list saved to {filename}")
 
 
-def main():
-    filename = f"{os.getenv('WIN_DESK_PATH')}youngblood_netops/get_device_list/get_device_list.xlsx"
-
-    os.makedirs(os.path.dirname(filename), exist_ok=True)
-
+def main() -> None:
+    parser = argparse.ArgumentParser(description="List devices from Catalyst Center")
+    parser.add_argument(
+        "--excel", "-e", help="Path to save Excel file with device information", default=None,
+    )
+    args = parser.parse_args()
     devices = get_device_list()
     print_device_list(devices)
-    save_devices_to_excel(devices, filename)
+    if args.excel:
+        save_devices_to_excel(devices, args.excel)
+
 
 if __name__ == "__main__":
     main()
-

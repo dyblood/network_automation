@@ -1,283 +1,218 @@
-import os
-import requests
-from requests.auth import HTTPBasicAuth
+"""Disable LLDP on interfaces where CDP is disabled.
+
+This script inspects running configurations on network devices and
+disables LLDP on any interface that has CDP explicitly turned off.
+In many environments CDP and LLDP are enabled by default, however
+there are scenarios—such as inter‑domain or security zones—where CDP
+is disabled on specific ports.  LLDP should also be disabled on those
+ports to prevent the device from advertising topology information.
+
+The script performs the following high‑level steps:
+
+1.  Query Catalyst Center for all network devices (optionally
+    restricted by device family).  By default all devices are
+    processed.
+2.  Connect to each device via SSH using Netmiko, leveraging
+    credentials from your ``.env`` file.
+3.  Parse the running configuration with :mod:`ciscoconfparse` to
+    locate interface blocks.  For every interface that contains ``no
+    cdp enable`` but does not already disable LLDP, build a set of
+    commands to enter the interface and issue ``no lldp transmit`` and
+    ``no lldp receive``.
+4.  Send the commands to the device using Netmiko.  Results and
+    errors are logged to a CSV tracker for auditing purposes.
+
+Because fetching a full running configuration can be time consuming,
+consider limiting the number of devices processed by specifying a
+device family (e.g. ``--family Switches and Hubs``).  Use the
+``--pattern`` option to restrict the script to devices whose hostname
+contains a given substring (case‑insensitive).
+
+Example::
+
+    python put_lldp_config.py --family "Switches and Hubs" --pattern LAB
+
+Security Note:  Credentials are loaded from environment variables via
+``python‑dotenv``.  Ensure you have created a local ``.env`` file
+based on the provided template and that sensitive information is not
+committed to version control.  See the project README for more
+details.
+"""
+
+from __future__ import annotations
+
+import argparse
 import csv
-from netmiko import ConnectHandler, NetmikoTimeoutException, NetmikoAuthenticationException
+import os
+from datetime import datetime
+from typing import Iterable, List
+
+try:
+    from dotenv import load_dotenv  # type: ignore
+except Exception:
+    # Provide a no‑op fallback when python‑dotenv is unavailable.  This
+    # allows the script to run in environments where dependencies are
+    # not yet installed, provided that necessary environment variables
+    # are already set.
+    def load_dotenv(*args: any, **kwargs: any) -> None:
+        return None
 from ciscoconfparse import CiscoConfParse
-from dotenv import load_dotenv
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from na_utils import dnac
+from na_utils import net_device
+
 
 load_dotenv()
-requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
-DNAC_BURL = os.getenv('DNAC_BURL')
-DNAC_USER = os.getenv('DNAC_USER')
-DNAC_PASS = os.getenv('DNAC_PASS')
-WIN_DESK_PATH = os.getenv('WIN_DESK_PATH')
-CONFIG_DIR = f"{WIN_DESK_PATH}youngblood_netops/lldp_config/"
-TRACKER_CSV = f"{CONFIG_DIR}lldp_config_tracker.csv"
-DEVICE_LIST_CSV = f"{CONFIG_DIR}get_device_list.csv"
 
-def get_auth_token():
-    url = f"{DNAC_BURL}/dna/system/api/v1/auth/token"
-    response = requests.post(url, auth=(DNAC_USER, DNAC_PASS), verify=False)
-    response.raise_for_status()
-    return response.json()['Token']
+def parse_interface_commands(config: str) -> List[str]:
+    """Generate commands to disable LLDP on interfaces with CDP disabled.
 
-def ensure_dir(path):
-    if not os.path.exists(path):
-        os.makedirs(path)
+    Parses the provided running configuration and locates all
+    ``interface`` stanzas.  For each interface, if it contains the
+    directive ``no cdp enable`` and does not already include ``no
+    lldp transmit``, a sequence of commands is built to enter the
+    interface configuration mode and disable LLDP transmit and
+    receive.  The interface name is extracted from the first word of
+    the interface header.
 
-def get_device_list(token):
+    :param config: The full running configuration of a device.
+    :returns: A flat list of CLI commands to send to the device.
     """
-    Building out function to retrieve list of devices. Using requests.get
+    parse = CiscoConfParse(config.splitlines())
+    commands: List[str] = []
+    for iface in parse.find_objects(r"^interface "):
+        # Determine if CDP is disabled on this interface
+        children = [child.text.strip() for child in iface.children]
+        has_no_cdp = any(line.lower().startswith("no cdp enable") for line in children)
+        # Determine if LLDP already disabled
+        has_no_lldp_tx = any(line.lower().startswith("no lldp transmit") for line in children)
+        if has_no_cdp and not has_no_lldp_tx:
+            int_name = iface.text.split()[1]
+            commands.append(f"interface {int_name}")
+            commands.append("no lldp transmit")
+            commands.append("no lldp receive")
+            commands.append("exit")
+    return commands
+
+
+def write_tracker_row(tracker_path: str, row: Iterable[str]) -> None:
+    """Append a row to the CSV tracker file.
+
+    Creates the file with headers if it does not already exist.
+
+    :param tracker_path: Path to the CSV file.
+    :param row: Iterable of values to write as a row.
     """
-   
-    url = DNAC_BURL + "/api/v1/network-device"
-    hdr = {'x-auth-token': token, 'content-type' : 'application/json'}
-    resp = requests.get(url, headers=hdr, verify=False)  # Make the Get Request
-    device_list = resp.json()
-    save_to_cvs(device_list)
-
-def save_to_cvs(device_list, filename=f'{DEVICE_LIST_CSV}'):
-    with open(filename, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow([
-            "hostname", 
-            "managementIpAddress", 
-            "macAddress", 
-            "serialNumber",
-            "reachabilityStatus",
-            "upTime",
-            "type",
-            "softwareType",
-            "softwareVersion",
-            "platformId",
-            "role",
-            "family",
-            "instanceUuid",
-            "instanceTenantId",
-            "id"
-        ])
-
-        for i in device_list['response']:
-            writer.writerow([
-                i["hostname"],
-                i["managementIpAddress"],
-                i["macAddress"],
-                i["serialNumber"],
-                i["reachabilityStatus"],
-                i["upTime"],
-                i["type"],
-                i["softwareType"],
-                i["softwareVersion"],
-                i["platformId"],
-                i["role"],
-                i["family"],
-                i["instanceUuid"],
-                i["instanceTenantId"],
-                i["id"]
-            ])
-
-def cvs_to_dict():
-    dev_list = []
-    device_list_cvs = f'{DEVICE_LIST_CSV}'
-    # with open('get_device_list_cvs.csv', mode='r') as csvfile:
-    with open(device_list_cvs, mode='r') as csvfile:
-        reader = csv.DictReader(csvfile)
-        dev_list_dict = [row for row in reader]
-    
-    for i in dev_list_dict:
-        if i['family'] == 'Routers' or i['family'] == 'Switches and Hubs':
-            # Update device_type based on softwareType
-            if i['softwareType'] == 'IOS-XE':
-                device_type = 'cisco_xe'
-            elif i['softwareType'] == 'IOS':
-                device_type = 'cisco_ios'
-            else:
-                device_type = 'cisco_ios'  # Keep original if it doesn't match
-
-            dev_dict = {
-                'hostname': i['hostname'],
-                'host': i['managementIpAddress'],
-                'device_type': device_type,
-                'family': i['family'],
-                'reachability': i["reachabilityStatus"]
-            }
-            dev_list.append(dev_dict)  
-    return dev_list
+    file_exists = os.path.exists(tracker_path)
+    with open(tracker_path, "a", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        if not file_exists:
+            writer.writerow(["timestamp", "hostname", "ip", "status", "interfaces", "message"])
+        writer.writerow(row)
 
 
-def connect_device(device):
-    try:
-        connection = ConnectHandler(
-            device_type=device["device_type"],
-            host=device["host"],
-            username=DNAC_USER,
-            password=DNAC_PASS
-        )
-        return connection
-    except (NetmikoTimeoutException, NetmikoAuthenticationException) as e:
-        print(f"[ERROR] Connection to {device['host']} failed: {e}")
-        return None
+def process_device(hostname: str, ip: str) -> tuple[bool, int, str]:
+    """Connect to a device, build LLDP disable commands and apply them.
 
-
-def get_and_parse_config(connection, hostname):
-    output = connection.send_command("show running-config")
-    config_path = os.path.join(CONFIG_DIR, f"{hostname}.conf")
-    with open(config_path, "w") as f:
-        f.write(output)
-    return CiscoConfParse(config_path, syntax="ios")
-
-
-def find_and_remove_lines(connection, parse, parent=None, child=None, exact_line=None):
+    :param hostname: Device name for logging.
+    :param ip: Management IP address.
+    :returns: Tuple of success flag, number of interfaces processed and a message.
     """
-    If parent and child are provided, removes matching child lines under parent.
-    If exact_line is provided, removes that line directly.
-    """
+    conn = net_device.connect_device(ip)
+    if not conn:
+        return False, 0, "SSH connection failed"
     try:
-        if parent and child:
-            parent_objs = parse.find_objects_w_child(parentspec=parent, childspec=child)
-            for p_obj in parent_objs:
-                for c_obj in p_obj.children:
-                    if child in c_obj.text:
-                        cmd_set = [p_obj.text.strip(), f'no {c_obj.text.strip()}']
-                        print(f"Removing: {cmd_set}")
-                        print(connection.send_config_set(cmd_set))
-        elif exact_line:
-            matching_lines = parse.find_lines(exact_line)
-            for line in matching_lines:
-                cmd = f'no {line.strip()}'
-                print(f"Removing exact line: {cmd}")
-                print(connection.send_config_set([cmd]))
-    except Exception as e:
-        print(f"[ERROR] Failed to remove lines: {e}")
+        # Retrieve full running config.  In practice you might limit
+        # this with a pipe (e.g. ``show run | section interface``) but
+        # here we fetch the entire config to ensure LLDP state is
+        # parsed correctly.
+        running = conn.send_command("show running-config", read_timeout=90)
+        commands = parse_interface_commands(running)
+        if not commands:
+            conn.disconnect()
+            return True, 0, "No interfaces required changes"
+        # Count interfaces by counting "interface" lines in commands
+        num_interfaces = sum(1 for cmd in commands if cmd.startswith("interface "))
+        output = net_device.send_config_commands(conn, commands)
+        conn.disconnect()
+        return True, num_interfaces, output.splitlines()[0] if output else "Commands sent"
+    except Exception as exc:  # pragma: no cover
+        try:
+            conn.disconnect()
+        except Exception:
+            pass
+        return False, 0, f"Error processing device: {exc}"
 
-def disable_lldp_if_cdp_disabled(connection, parse):
+
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Disable LLDP on interfaces where CDP is disabled")
+    parser.add_argument(
+        "--family",
+        default=None,
+        help=("Device family to filter on (e.g. 'Switches and Hubs'). "
+              "If omitted all devices are processed."),
+    )
+    parser.add_argument(
+        "--pattern",
+        default=None,
+        help="Substring used to match device hostnames (case‑insensitive).",
+    )
+    parser.add_argument(
+        "--tracker",
+        default="lldp_change_tracker.csv",
+        help="Path to CSV tracker file. Defaults to 'lldp_change_tracker.csv'.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    tracker = args.tracker
+    family = args.family
+    pattern = args.pattern.lower() if args.pattern else None
+
+    # Retrieve devices from Catalyst Center
     try:
-        interfaces = parse.find_objects("^interface ")
-        for intf in interfaces:
-            has_no_cdp = any("no cdp enable" in child.text for child in intf.children)
-            has_no_lldp = any("no lldp transmit" in child.text or "no lldp receive" in child.text or "no lldp enable" in child.text for child in intf.children)
-            if has_no_cdp and not has_no_lldp:
-                interface_cmds = [
-                    intf.text.strip(),
-                    "no lldp transmit",
-                    "no lldp receive"
-                ]
-                print(f"Disabling LLDP on {intf.text.strip()} because CDP is disabled")
-                print(connection.send_config_set(interface_cmds))
-    except Exception as e:
-        print(f"[ERROR] Failed to disable LLDP where CDP is disabled: {e}")
-
-def additional_commands(connection, commands):
-    try:
-        print(connection.send_config_set(commands))
-    except Exception as e:
-        print(f"[ERROR] Failed to run '{commands}': {e}")
-
-
-def save_and_exit(connection):
-    try:
-        print(connection.send_command("write memory"))
-        connection.disconnect()
-    except Exception as e:
-        print(f"[ERROR] Save or disconnect failed: {e}")
-
-
-def create_csv_tracker(device_list, filename):
-    if not os.path.isfile(filename):
-        with open(filename, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(['hostname', 'ip_address', 'configured'])
-            for dev in device_list:
-                writer.writerow([dev['hostname'], dev['host'], 'no'])
-        print(f"[INFO] Tracker file created: {filename}")
-
-
-def update_configured_status(hostname, filename):
-    if not os.path.isfile(filename):
-        print(f"[ERROR] Tracker file {filename} does not exist.")
+        device_json = dnac.get_device_list(family=family) if family else dnac.get_device_list()
+    except Exception as exc:
+        raise RuntimeError(f"Failed to retrieve device list: {exc}")
+    devices = device_json.get("response", [])
+    if not devices:
+        print("No devices returned from Catalyst Center.")
         return
 
-    rows = []
-    with open(filename, "r") as f:
-        reader = csv.reader(f)
-        header = next(reader)
-        rows.append(header)
-        for row in reader:
-            if row[0] == hostname:
-                row[2] = 'yes'
-            rows.append(row)
+    # Filter by hostname pattern if provided
+    if pattern:
+        devices = [d for d in devices if pattern in str(d.get("hostname", "")).lower()]
+        if not devices:
+            print(f"No devices matching pattern '{args.pattern}' were found.")
+            return
 
-    with open(filename, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerows(rows)
-    print(f"[INFO] Updated status for {hostname}.")
-
-
-def get_not_configured_devices(filename):
-    with open(filename, "r") as f:
-        reader = csv.DictReader(f)
-        return [row["hostname"] for row in reader if row["configured"].lower() != 'yes']
-
-
-def process_device(device, patterns):
-    connection = connect_device(device)
-    if not connection:
-        return False
-
-    parse = get_and_parse_config(connection, device["hostname"])
-
-    for pattern in patterns:
-        find_and_remove_lines(
-            connection,
-            parse,
-            parent=pattern.get("parent"),
-            child=pattern.get("child"),
-            exact_line=pattern.get("exact")
-        )
-    
-    disable_lldp_if_cdp_disabled(connection, parse)
-
-    if "additional" in patterns[-1]:
-        additional_commands(connection, patterns[-1]["additional"])
-
-    save_and_exit(connection)
-    return True
+    print(f"Processing {len(devices)} device(s) to update LLDP configuration...")
+    for dev in devices:
+        hostname = dev.get("hostname", "unknown")
+        ip = dev.get("managementIpAddress") or dev.get("ipAddress")
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if not ip:
+            print(f"Skipping {hostname}: no management IP available")
+            write_tracker_row(tracker, [timestamp, hostname, "", "skipped", 0, "No management IP"])
+            continue
+        print(f"\nProcessing {hostname} ({ip})...")
+        success, num_ifaces, message = process_device(hostname, ip)
+        status = "success" if success else "failure"
+        if num_ifaces:
+            summary = f"Updated {num_ifaces} interface(s)"
+        else:
+            summary = message
+        print(summary)
+        write_tracker_row(tracker, [timestamp, hostname, ip, status, num_ifaces, summary])
 
 
-def main():
-    ensure_dir(CONFIG_DIR)
-    token = get_auth_token() 
-    get_device_list(token)
-    device_list = cvs_to_dict()
-
-    create_csv_tracker(device_list, TRACKER_CSV)
-    unconfigured = get_not_configured_devices(TRACKER_CSV)
-    patterns = [
-        # {"parent": "^ip access-list", "child": "<thing to search>"},
-        # {"parent": "^interface", "child": "NETFLOW"},
-        # {"exact": "VPN-NEXT-HOP-"},
-        # {"exact": "interface Tunnel"},
-        {"additional": [
-                        "lldp run"
-                        ]}
-    ]
-
-    for device in device_list:
-        hostname = device["hostname"]
-        if device["reachability"] == "Reachable" and hostname in unconfigured: 
-        # if hostname == 'ERT12-RTR.nasw.ds.army.mil' and hostname in unconfigured: 
-            print(f"\n{'-'*20} Processing {hostname} {'-'*20}")
-            if process_device(device, patterns):
-                update_configured_status(hostname, TRACKER_CSV)
-            print(f"{'-'*20} Done with {hostname} {'-'*20}")
-            
-    unconfigured = get_not_configured_devices(TRACKER_CSV)
-    print("Devices currently not configured:")
-    for i in unconfigured:
-        print(i)
-
-
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()

@@ -1,20 +1,38 @@
-import os
-from ciscoconfparse2 import Diff
+"""Structured configuration diff using ciscoconfparse2.
 
-def compare_configs(file1, file2):
-    diff_lines = Diff(file1, file2).get_diff()
-    print(os.linesep.join(diff_lines))
+This script compares two configuration files using the
+``ciscoconfparse2`` library which understands Cisco configuration
+syntax and can produce a more intuitive diff than a line‑by‑line
+comparison.  It falls back to the unified diff implementation if
+``ciscoconfparse2`` is not installed.
+
+Example::
+
+    python config_diff_v2.py config_a.conf config_b.conf
+
+The diff is printed to stdout.  To save to a file pass ``--output``.
+"""
+
+from __future__ import annotations
+
+import argparse
+from na_utils.config_utils import compare_configs_structured, compare_configs
 
 
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Compare two configs using a structured diff")
+    parser.add_argument("file1", help="First configuration file")
+    parser.add_argument("file2", help="Second configuration file")
+    parser.add_argument("--output", "-o", help="Write diff to this file", default=None)
+    args = parser.parse_args()
+    try:
+        diff = compare_configs_structured(args.file1, args.file2, args.output)
+    except RuntimeError:
+        # Fall back to unified diff if structured diff unavailable
+        diff = compare_configs(args.file1, args.file2, args.output)
+    if diff is not None:
+        print(diff)
 
-def main():
-    base_file = "/mnt/c/Users/devon.d.youngblood/OneDrive - US Army/Desktop/youngblood_netops/dev_configs_backup/"
-    # file1 = f"{base_file}/archive/20250314/FAK-01-RTR.nasw.ds.army.mil.conf"
-    file1 = f"{base_file}FAK-07-RTR.nasw.ds.army.mil.conf"
-    file2 = f"{base_file}FAK-01-RTR.nasw.ds.army.mil.conf"
-    # output_file = f"{base_file}compare_configs/FAK-01-RTR.txt"  # Set to None if you don't want to save to a file
-
-    compare_configs(file1, file2)
 
 if __name__ == "__main__":
     main()

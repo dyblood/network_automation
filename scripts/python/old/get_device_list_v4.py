@@ -91,8 +91,6 @@ def save_devices_to_excel(device_json, filename):
 
 
 def main():
-    # filename = "C:\\Users\\devon.d.youngblood\\OneDrive - US Army\\Desktop\\youngblood_netops\\get_device_list\\get_device_list.xlsx"
-    # filename = "/mnt/c/Users/devon.d.youngblood/OneDrive - US Army/Desktop/youngblood_netops/get_device_list/get_device_list.xlsx"
     filename = f"{os.getenv('WIN_DESK_PATH')}youngblood_netops/get_device_list/get_device_list.xlsx"
 
     os.makedirs(os.path.dirname(filename), exist_ok=True)

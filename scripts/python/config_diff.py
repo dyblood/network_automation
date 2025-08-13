@@ -1,37 +1,38 @@
-import difflib
+"""Compare two configuration files and optionally write a diff.
 
-def compare_configs(file1, file2, output_file=None):
-    try:
-        # Read the configuration files
-        with open(file1, 'r') as f1, open(file2, 'r') as f2:
-            config1 = f1.readlines()
-            config2 = f2.readlines()
+This script wraps :func:`na_utils.config_utils.compare_configs` to
+provide a convenient command‑line interface for comparing network
+configurations.  It supports writing the diff to a file or printing
+to stdout.  The underlying comparison uses a unified diff from the
+standard library.
 
-        # Generate the diff
-        diff = difflib.unified_diff(
-            config1, config2,
-            fromfile=file1,
-            tofile=file2,
-            lineterm=''
-        )
+Usage example::
 
-        # Output the diff
-        if output_file:
-            with open(output_file, 'w') as out_file:
-                out_file.writelines(line + '\n' for line in diff)
-            print(f"Diff saved to {output_file}")
-        else:
-            print("\n".join(diff))
+    python config_diff.py /path/to/config1.conf /path/to/config2.conf --output diff.txt
 
-    except FileNotFoundError as e:
-        print(f"Error: {e}")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
+The module intentionally avoids hard‑coded paths.  If you used
+previous versions of this script which contained example paths, you
+should now specify your own files as arguments.
+"""
 
-# Example usage
-base_file = "/mnt/c/Users/devon.d.youngblood/OneDrive - US Army/Desktop/youngblood_netops/dev_configs_backup/"
-file1 = f"{base_file}/archive/20250314/FAK-01-RTR.nasw.ds.army.mil.conf"
-file2 = f"{base_file}FAK-01-RTR.nasw.ds.army.mil.conf"
-output_file = f"{base_file}compare_configs/FAK-01-RTR.txt"  # Set to None if you don't want to save to a file
+from __future__ import annotations
 
-compare_configs(file1, file2, output_file)
+import argparse
+from na_utils.config_utils import compare_configs
+
+
+def main() -> None:
+    """Parse command line arguments and perform the configuration diff."""
+    parser = argparse.ArgumentParser(description="Compare two configuration files")
+    parser.add_argument("file1", help="Path to the first configuration file")
+    parser.add_argument("file2", help="Path to the second configuration file")
+    parser.add_argument("--output", "-o", help="Optional file to write diff to", default=None)
+    args = parser.parse_args()
+
+    diff_result = compare_configs(args.file1, args.file2, args.output)
+    if diff_result is not None:
+        print(diff_result)
+
+
+if __name__ == "__main__":
+    main()

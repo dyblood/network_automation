@@ -1,0 +1,8 @@
+---
+# Sample playbook to gather software version from network devices.
+
+- name: Collect software version from routers and switches
+  hosts: all
+  gather_facts: no
+  roles:
+    - common

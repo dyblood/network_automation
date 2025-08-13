@@ -1,7 +1,6 @@
 import requests
 import os
 from requests.auth import HTTPBasicAuth
-from env_DNAC import *
 import csv
 import datetime
 from dotenv import load_dotenv
@@ -33,13 +32,14 @@ def get_device_list():
     device_list = resp.json()
     save_to_cvs(device_list)
 
-def save_to_cvs(device_list, filename=f'{os.getenv('WIN_DESK_PATH')}dev_configs/cvs/get_device_list.csv'):
+def save_to_cvs(device_list, filename=f'{os.getenv('WIN_DESK_PATH')}youngblood_netops/get_device_list/get_device_list_modified.csv'):
     with open(filename, mode='w', newline='') as file:
         writer = csv.writer(file)
         writer.writerow([
             "hostname", 
             "managementIpAddress", 
             "macAddress", 
+            "apEthernetMacAddress"
             "serialNumber",
             "reachabilityStatus",
             "upTime",
@@ -59,6 +59,7 @@ def save_to_cvs(device_list, filename=f'{os.getenv('WIN_DESK_PATH')}dev_configs/
                 i["hostname"],
                 i["managementIpAddress"],
                 i["macAddress"],
+                i["apEthernetMacAddress"],
                 i["serialNumber"],
                 i["reachabilityStatus"],
                 i["upTime"],
@@ -104,6 +105,8 @@ def cvs_to_dict():
 
 def main():
     get_device_list()
+
+
     cvs_to_dict()
 
 if __name__ == "__main__":

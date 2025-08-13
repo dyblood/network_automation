@@ -1,0 +1,8 @@
+---
+# Group variables applied to all hosts.
+ansible_connection: network_cli
+# Default network OS; overridden per host in dynamic inventory.
+ansible_network_os: iosxe
+# Privilege escalation method for network devices.
+ansible_become: yes
+ansible_become_method: enable

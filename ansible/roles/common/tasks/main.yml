@@ -1,0 +1,11 @@
+---
+# Common role to gather information from network devices.
+
+- name: Gather IOS facts
+  cisco.ios.ios_facts:
+    gather_subset:
+      - version
+
+- name: Display software version
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} is running {{ ansible_net_version }}"

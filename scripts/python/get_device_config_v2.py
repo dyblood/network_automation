@@ -1,89 +1,68 @@
-import json
-import re
+"""Fetch running configurations from reachable devices.
+
+This script queries Catalyst Center for network devices, filters the
+list to only those that report a ``reachabilityStatus`` of
+``Reachable`` and then connects to each device via SSH to retrieve
+its running configuration.  The configurations are saved to
+``<output_dir>/<hostname>.conf``.  Use environment variables to set
+device credentials; see ``.env.template`` for details.
+"""
+
+from __future__ import annotations
+
+import argparse
 import os
-import csv
-from netmiko import ConnectHandler
-from netmiko import NetmikoTimeoutException, NetmikoAuthenticationException
-from ciscoconfparse import CiscoConfParse
-from get_device_list_cvs import *
+from pathlib import Path
+from typing import Dict, Any
+
+import sys
+
 from dotenv import load_dotenv
+
 load_dotenv()
 
-requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
+# Ensure project root on sys.path for na_utils
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-DNAC_BURL = os.getenv('DNAC_BURL')
-DNAC_USER = os.getenv('DNAC_USER')
-DNAC_PASS = os.getenv('DNAC_PASS')
-WIN_DESK_PATH = os.getenv('WIN_DESK_PATH')
-CONFIG_DIR = f"{WIN_DESK_PATH}youngblood_netops/device_configs_backup/"
+from na_utils.dnac import get_device_list
+from na_utils.net_device import connect_device
 
-def connect_device(device):
-    try:
-        # Establish the connection | send the commmand | disconnect
-        # connection = ConnectHandler(**device)
-        connection = ConnectHandler(
-            device_type = device["device_type"],
-            host = device["host"],
-            username = DNAC_USER,
-            password = DNAC_PASS
-        )
-        return connection
 
-    except NetmikoTimeoutException:
-        print(f"Timeout connecting to {device["host"]}")
-        return None
-    except NetmikoAuthenticationException:
-        print(f"Authentication failure for {device["host"]}")
-        return None
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Save running config from reachable devices")
+    parser.add_argument(
+        "--output-dir", "-o",
+        help="Directory to write configuration files to",
+        default="device_configs",
+    )
+    args = parser.parse_args()
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    devices: Dict[str, Any] = get_device_list()
+    reachable = [dev for dev in devices.get("response", []) if dev.get("reachabilityStatus") == "Reachable"]
+    if not reachable:
+        print("No reachable devices found")
+        return
+    for dev in reachable:
+        hostname = dev.get("hostname") or dev.get("id")
+        ip = dev.get("managementIpAddress")
+        print(f"Connecting to {hostname} ({ip})…")
+        conn = connect_device(ip)
+        if not conn:
+            continue
+        try:
+            output = conn.send_command("show running-config")
+            file_path = out_dir / f"{hostname}.conf"
+            with open(file_path, "w") as fh:
+                fh.write(output)
+            print(f"Saved config to {file_path}")
+        except Exception as exc:
+            print(f"Failed to retrieve config from {hostname}: {exc}")
+        finally:
+            conn.disconnect()
 
-def parse_device_config(connection, hostname):
-    try:
-        # saves running config as output variable.
-        output = connection.send_command('show running-config')
-        
-        #saving running config as a .conf file so that it can get parsed by CiscoConfParse
-        dev_config = output
-        dev_name = f'{CONFIG_DIR}{hostname}.conf'
-        with open(dev_name, 'w') as file:
-            file.write(dev_config)
-        print(f'sucessfully made {dev_name}')
 
-        #Parse the running config w/ CiscoConfParse
-        parse = CiscoConfParse(dev_name, syntax="ios")
-
-        return parse
-
-    except Exception as e:
-        print(f'An error occured: {e}')
-def save_and_exit(connection):
-    try:
-        #Just pulling the current running config so write memory is commented out
-        #write memory
-        #cmd_output = connection.send_command('write memory')
-        #Fprint(cmd_output)
-
-        #disconnect
-        connection.disconnect()
-    
-    except Exception as e:
-        print(f'An error occured: {e}')
-
-def main():
-    get_device_list()
-    device_list = cvs_to_dict()
-    for i in device_list:
-        if i['reachability'] == 'Reachable':
-            print('+' * 40, 'START', i["hostname"], 'START','+' * 43)
-            device = i
-            connection = connect_device(i)
-            if connection:
-                parse = parse_device_config(connection, i['hostname'])
-                save_and_exit(connection)
-            print('+' * 40, 'COMPLETE', i["hostname"], 'COMPLETE','+' * 40)
-       
-    print('*' * 70, 'COMPLETE','*' * 70)
-    
 if __name__ == "__main__":
     main()
-
-
