@@ -41,7 +41,7 @@ def main() -> None:
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     devices: Dict[str, Any] = get_device_list()
-    reachable = [dev for dev in devices.get("response", []) if dev.get("reachabilityStatus") == "Reachable"]
+    reachable = [dev for dev in devices.get("response", []) if dev.get("reachabilityStatus") == "Reachable" and dev.get('family') != "Unified AP"]
     if not reachable:
         print("No reachable devices found")
         return
