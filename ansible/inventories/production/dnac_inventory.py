@@ -31,9 +31,10 @@ from typing import Any
 # automatically include the repository root.  Adding the parent
 # directories makes the `na_utils` package available.
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+THIS_DIR = os.path.dirname(__file__)
+PROJECT_ROOT = os.path.abspath(os.path.join(THIS_DIR, "..", "..", ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from na_utils.dnac import get_device_list, to_ansible_inventory
 

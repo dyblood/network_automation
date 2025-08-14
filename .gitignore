@@ -2,6 +2,8 @@
 wsl_venv/
 wsl_venv/*
 .venv
+device_configs/
+device_configs/*
 
 
 
