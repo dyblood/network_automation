@@ -184,6 +184,9 @@ def to_ansible_inventory(device_json: Dict[str, Any], *, group_by_family: bool =
         hostname = dev.get("hostname") or dev.get("id")
         mgmt_ip = dev.get("managementIpAddress")
         family = (dev.get("family") or "ungrouped").replace(" ", "_").lower()
+        # Software type normalization with iosxe as default
+        raw_swtype = dev.get("softwareType")
+        dev_os = (raw_swtype if isinstance(raw_swtype, str) and raw_swtype.strip() else "iosxe").replace("-", "").lower()
         # Initialize group if required
         if group_by_family:
             if family not in inventory:
@@ -200,7 +203,7 @@ def to_ansible_inventory(device_json: Dict[str, Any], *, group_by_family: bool =
             "ansible_host": mgmt_ip,
             "ansible_user": username,
             "ansible_password": password,
-            "ansible_network_os": (dev.get("softwareType", "iosxe").replace("-", "").lower() or "iosxe"),
+            "ansible_network_os": dev_os,
         }
     inventory["all"] = {"children": all_children}
     return inventory
