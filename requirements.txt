@@ -19,6 +19,7 @@ certifi==2025.8.3
 cffi==1.17.1
 chardet==5.2.0
 charset-normalizer==3.4.3
+ciscoconfparse==1.9.52
 ciscoconfparse2==0.8.34
 ciscoisesdk==2.3.1
 click==8.2.1
@@ -52,7 +53,7 @@ gitdb==4.0.12
 GitPython==3.1.45
 grpcio==1.74.0
 h11==0.16.0
-hier-config==3.2.2
+hier-config==2.2.3
 hypothesis==6.138.2
 idna==3.10
 iniconfig==2.1.0
@@ -64,7 +65,7 @@ jsonpickle==4.1.1
 junit-xml==1.9
 libpass==1.9.1.post0
 lockfile==0.12.2
-loguru==0.7.3
+loguru==0.7.2
 lxml==6.0.0
 macaddress==2.0.2
 markdown-it-py==4.0.0
